@@ -1,0 +1,64 @@
+# Datos sensibles y resultados del proceso
+Data/
+Output/
+*.csv
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+~$*
+
+# Entornos locales y dependencias
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Configuracion local y secretos
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*
+secrets*
+config.local.*
+
+# Notebooks y archivos temporales
+.ipynb_checkpoints/
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+
+# Logs y reportes locales
+*.log
+logs/
+*.out
+*.err
+
+# Builds, ejecutables y empaquetado
+build/
+dist/
+*.spec
+*.exe
+*.dll
+*.msi
+
+# Herramientas de testing/cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs y sistema operativo
+.vscode/
+.idea/
+.DS_Store
