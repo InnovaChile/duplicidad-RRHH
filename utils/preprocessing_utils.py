@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import re
+import unicodedata
 from dateutil.relativedelta import relativedelta    
 
 import warnings
@@ -173,6 +174,101 @@ def df_crea_valida(df: pd.DataFrame, id: str, meses_crea: int) -> pd.DataFrame:
 
     return df_final
 
+def _normalizar_texto(valor: str) -> str:
+    valor = str(valor).strip().lower()
+    valor = unicodedata.normalize("NFKD", valor)
+    valor = valor.encode("ascii", errors="ignore").decode("utf-8")
+    valor = re.sub(r"\s+", " ", valor)
+    return valor
+
+def _buscar_columna(df: pd.DataFrame, nombre: str) -> str:
+    objetivo = _normalizar_texto(nombre)
+    for columna in df.columns:
+        if _normalizar_texto(columna) == objetivo:
+            return columna
+    raise KeyError(f"No se encontro la columna requerida: {nombre}")
+
+def _serie_aporte_ppto_linea_ch(df: pd.DataFrame) -> pd.Series:
+    columnas_aporte = [
+        "Aporte Innova Chile (Subsidio) ($)",
+        "Aporte Beneficiaria (Valorado) $",
+        "Aporte Beneficiaria (Pecuniario) $",
+    ]
+
+    for nombre_columna in columnas_aporte:
+        try:
+            columna = _buscar_columna(df, nombre_columna)
+            valores = pd.to_numeric(df[columna], errors="coerce").fillna(0)
+            if valores.sum() > 0:
+                return df[columna]
+        except KeyError:
+            continue
+
+    return pd.Series([0] * len(df), index=df.index)
+
+def df_ppto_linea_ch(path: str, postulante: str) -> pd.DataFrame:
+    """Procesa la modalidad nueva de CH con hojas de presupuesto en linea."""
+
+    xl = pd.ExcelFile(path)
+    hojas_rrhh = [
+        hoja for hoja in xl.sheet_names
+        if (
+            "recursos humanos" in _normalizar_texto(hoja)
+            and (
+                "aporte corfo" in _normalizar_texto(hoja)
+                or "aporte benefi" in _normalizar_texto(hoja)
+            )
+        )
+    ]
+
+    if not hojas_rrhh:
+        raise ValueError("No se encontraron hojas de Recursos Humanos de presupuesto en linea.")
+
+    dfs = []
+    for hoja in hojas_rrhh:
+        df = pd.read_excel(path, sheet_name=hoja, header=1)
+        df = df.dropna(axis=1, how="all")
+
+        columna_nombre = _buscar_columna(df, "Nombre RR.HH")
+        columna_rut = _buscar_columna(df, "Rut")
+        columna_horas = _buscar_columna(df, "Horas Mensuales")
+        columna_meses = _buscar_columna(df, "N° Meses")
+        columna_costo = _buscar_columna(df, "Costo Unitario ($)/HH")
+
+        df = df.dropna(subset=[columna_nombre, columna_rut])
+        if df.empty:
+            continue
+
+        df_final = pd.DataFrame({
+            "nombre": df[columna_nombre],
+            "rut": df[columna_rut],
+            "horas_mes": df[columna_horas],
+            "meses": df[columna_meses],
+            "costo_hora": df[columna_costo],
+            "aporte_innova": _serie_aporte_ppto_linea_ch(df),
+        })
+        df_final["codigo_postulacion"] = postulante
+        df_final["id_postulacion"] = postulante.split(".")[0]
+        df_final["rut"] = (
+            df_final["rut"]
+            .astype(str)
+            .str.replace(".", "", regex=False)
+            .str.replace("-", "", regex=False)
+            .str.replace(" ", "", regex=False)
+        )
+        df_final["tipo"] = "Otro"
+        df_final["meses_crea"] = 0
+        dfs.append(df_final)
+
+    if not dfs:
+        return pd.DataFrame(columns=[
+            "nombre", "rut", "horas_mes", "meses", "costo_hora",
+            "aporte_innova", "codigo_postulacion", "id_postulacion",
+            "tipo", "meses_crea"
+        ])
+
+    return pd.concat(dfs, ignore_index=True)
+
 def generador_postulantes(file_path: str) -> pd.DataFrame:
     """El proceso es distinto si corresponde a Crea, Valida u otro"""
 
@@ -185,13 +281,19 @@ def generador_postulantes(file_path: str) -> pd.DataFrame:
 
         path = os.path.join(file_path, postulante)
         try:
-            df = pd.read_excel(path, sheet_name="RRHH")
+            tipo = postulante.split(".")[0].split("-")[0]
+            try:
+                df = pd.read_excel(path, sheet_name="RRHH")
+            except Exception:
+                if re.search(r"CH", tipo):
+                    df = df_ppto_linea_ch(path, postulante)
+                    final_df = pd.concat([final_df, df], ignore_index=True)
+                    continue
+                raise
 
             # Añadir el nombre del codigo_postulacion como columna
             df['codigo_postulacion'] = postulante.replace('.xlsx', '') # Añadir el nombre del codigo_postulacion como columna
-            
-            tipo = postulante.split(".")[0].split("-")[0]
-        
+
             if "IATS" in tipo or "CH" in tipo:
                 pass
             elif re.search(r"CV",tipo):
