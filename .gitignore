@@ -14,8 +14,16 @@ venv/
 env/
 ENV/
 __pycache__/
+**/__pycache__/
 *.py[cod]
+*.pyc
+*.pyo
+*.pyd
 *$py.class
+.python-version
+.mypy_cache/
+.ruff_cache/
+.pyre/
 
 # Configuracion local y secretos
 .env
