@@ -188,39 +188,74 @@ def _buscar_columna(df: pd.DataFrame, nombre: str) -> str:
             return columna
     raise KeyError(f"No se encontro la columna requerida: {nombre}")
 
-def _serie_aporte_ppto_linea_ch(df: pd.DataFrame) -> pd.Series:
+def _columnas_aporte_ppto_linea(df: pd.DataFrame) -> list:
     columnas_aporte = [
-        "Aporte Innova Chile (Subsidio) ($)",
-        "Aporte Beneficiaria (Valorado) $",
-        "Aporte Beneficiaria (Pecuniario) $",
+        ("Aporte Innova Chile", "Aporte Innova Chile (Subsidio) ($)"),
+        ("Aporte Beneficiaria Valorado", "Aporte Beneficiaria (Valorado) $"),
+        ("Aporte Beneficiaria Pecuniario", "Aporte Beneficiaria (Pecuniario) $"),
+        ("Aporte Asociados Valorado", "Aporte Asociados (Valorado) $"),
+        ("Aporte Asociados Pecuniario", "Aporte Asociados (Pecuniario) $"),
     ]
 
-    for nombre_columna in columnas_aporte:
+    columnas_disponibles = []
+    for fuente_aporte, nombre_columna in columnas_aporte:
         try:
-            columna = _buscar_columna(df, nombre_columna)
-            valores = pd.to_numeric(df[columna], errors="coerce").fillna(0)
-            if valores.sum() > 0:
-                return df[columna]
+            columnas_disponibles.append((fuente_aporte, _buscar_columna(df, nombre_columna)))
         except KeyError:
             continue
 
-    return pd.Series([0] * len(df), index=df.index)
+    return columnas_disponibles
 
-def df_ppto_linea_ch(path: str, postulante: str) -> pd.DataFrame:
-    """Procesa la modalidad nueva de CH con hojas de presupuesto en linea."""
+def _distribuir_horas_por_aporte(
+    df: pd.DataFrame,
+    columna_nombre: str,
+    columna_rut: str,
+    columna_horas: str,
+    columna_meses: str,
+    columna_costo: str,
+    postulante: str
+) -> pd.DataFrame:
+    columnas_aporte = _columnas_aporte_ppto_linea(df)
+    filas = []
 
-    xl = pd.ExcelFile(path)
-    hojas_rrhh = [
-        hoja for hoja in xl.sheet_names
-        if (
-            "recursos humanos" in _normalizar_texto(hoja)
-            and (
-                "aporte corfo" in _normalizar_texto(hoja)
-                or "aporte benefi" in _normalizar_texto(hoja)
-            )
-        )
-    ]
+    for _, row in df.iterrows():
+        horas_mes = pd.to_numeric(pd.Series([row[columna_horas]]), errors="coerce").iloc[0]
+        aportes = []
 
+        for fuente_aporte, columna_aporte in columnas_aporte:
+            monto_aporte = pd.to_numeric(
+                pd.Series([row[columna_aporte]]), errors="coerce"
+            ).fillna(0).iloc[0]
+            if monto_aporte > 0:
+                aportes.append((fuente_aporte, columna_aporte, monto_aporte))
+
+        total_aportes = sum(monto for _, _, monto in aportes)
+        if not aportes or total_aportes <= 0:
+            aportes = [("Sin aporte identificado", None, 0)]
+            total_aportes = 0
+
+        for fuente_aporte, _, monto_aporte in aportes:
+            horas_distribuidas = horas_mes
+            if total_aportes > 0 and not pd.isna(horas_mes):
+                horas_distribuidas = horas_mes * (monto_aporte / total_aportes)
+
+            filas.append({
+                "nombre": row[columna_nombre],
+                "rut": row[columna_rut],
+                "horas_mes": horas_distribuidas,
+                "meses": row[columna_meses],
+                "costo_hora": row[columna_costo],
+                "aporte_innova": monto_aporte,
+                "fuente_aporte": fuente_aporte,
+                "codigo_postulacion": postulante,
+                "id_postulacion": postulante.split(".")[0],
+                "tipo": "Otro",
+                "meses_crea": 0,
+            })
+
+    return pd.DataFrame(filas)
+
+def _df_ppto_linea_rrhh(path: str, postulante: str, hojas_rrhh: list) -> pd.DataFrame:
     if not hojas_rrhh:
         raise ValueError("No se encontraron hojas de Recursos Humanos de presupuesto en linea.")
 
@@ -239,16 +274,15 @@ def df_ppto_linea_ch(path: str, postulante: str) -> pd.DataFrame:
         if df.empty:
             continue
 
-        df_final = pd.DataFrame({
-            "nombre": df[columna_nombre],
-            "rut": df[columna_rut],
-            "horas_mes": df[columna_horas],
-            "meses": df[columna_meses],
-            "costo_hora": df[columna_costo],
-            "aporte_innova": _serie_aporte_ppto_linea_ch(df),
-        })
-        df_final["codigo_postulacion"] = postulante
-        df_final["id_postulacion"] = postulante.split(".")[0]
+        df_final = _distribuir_horas_por_aporte(
+            df,
+            columna_nombre,
+            columna_rut,
+            columna_horas,
+            columna_meses,
+            columna_costo,
+            postulante
+        )
         df_final["rut"] = (
             df_final["rut"]
             .astype(str)
@@ -256,18 +290,44 @@ def df_ppto_linea_ch(path: str, postulante: str) -> pd.DataFrame:
             .str.replace("-", "", regex=False)
             .str.replace(" ", "", regex=False)
         )
-        df_final["tipo"] = "Otro"
-        df_final["meses_crea"] = 0
         dfs.append(df_final)
 
     if not dfs:
         return pd.DataFrame(columns=[
             "nombre", "rut", "horas_mes", "meses", "costo_hora",
-            "aporte_innova", "codigo_postulacion", "id_postulacion",
-            "tipo", "meses_crea"
+            "aporte_innova", "fuente_aporte", "codigo_postulacion",
+            "id_postulacion", "tipo", "meses_crea"
         ])
 
     return pd.concat(dfs, ignore_index=True)
+
+def df_ppto_linea_ch(path: str, postulante: str) -> pd.DataFrame:
+    """Procesa la modalidad nueva de CH con hojas de presupuesto en linea."""
+
+    xl = pd.ExcelFile(path)
+    hojas_rrhh = [
+        hoja for hoja in xl.sheet_names
+        if (
+            "recursos humanos" in _normalizar_texto(hoja)
+            and (
+                "aporte corfo" in _normalizar_texto(hoja)
+                or "aporte benefi" in _normalizar_texto(hoja)
+            )
+        )
+    ]
+
+    return _df_ppto_linea_rrhh(path, postulante, hojas_rrhh)
+
+def df_ppto_linea_cye(path: str, postulante: str) -> pd.DataFrame:
+    """Procesa CYE en formato de presupuesto en linea."""
+
+    xl = pd.ExcelFile(path)
+    hojas_rrhh = [
+        hoja for hoja in xl.sheet_names
+        if _normalizar_texto(hoja) == "recursos humanos"
+    ]
+
+    return _df_ppto_linea_rrhh(path, postulante, hojas_rrhh)
 
 def generador_postulantes(file_path: str) -> pd.DataFrame:
     """El proceso es distinto si corresponde a Crea, Valida u otro"""
@@ -287,6 +347,10 @@ def generador_postulantes(file_path: str) -> pd.DataFrame:
             except Exception:
                 if re.search(r"CH", tipo):
                     df = df_ppto_linea_ch(path, postulante)
+                    final_df = pd.concat([final_df, df], ignore_index=True)
+                    continue
+                if re.search(r"CYE", tipo):
+                    df = df_ppto_linea_cye(path, postulante)
                     final_df = pd.concat([final_df, df], ignore_index=True)
                     continue
                 raise
