@@ -9,6 +9,8 @@ warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+LIMITE_HORAS_MENSUALES = 168
+
 def main():
     print("Iniciando...")
 
@@ -123,16 +125,16 @@ def main():
     # Calcular la suma total de horas por fila
     df_final['total_horas'] = df_final['horas'].apply(sum)
 
-    # Filtrar los ruts con más de 180 horas
-    ruts_mas_180 = df_final[df_final['total_horas'] > 180]['rut'].unique()
+    # Filtrar los ruts que superan el limite mensual de horas
+    ruts_sobre_limite = df_final[df_final['total_horas'] > LIMITE_HORAS_MENSUALES]['rut'].unique()
 
     # Crear DataFrames separados
-    df_mas_180 = df_final[df_final['rut'].isin(ruts_mas_180)]
-    df_menos_180 = df_final[~df_final['rut'].isin(ruts_mas_180)]
+    df_sobre_limite = df_final[df_final['rut'].isin(ruts_sobre_limite)]
+    df_bajo_limite = df_final[~df_final['rut'].isin(ruts_sobre_limite)]
 
-    # Obtenemos todos los valores de df_mas_180 que son mayores a 180
+    # Obtenemos todos los valores que superan el limite mensual
 
-    df_topes = df_mas_180[df_mas_180['total_horas'] > 180]
+    df_topes = df_sobre_limite[df_sobre_limite['total_horas'] > LIMITE_HORAS_MENSUALES]
 
     # Usamos los nombres y ruts de df
     try:

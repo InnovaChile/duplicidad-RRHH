@@ -1,6 +1,6 @@
  # Duplicidad de RRHH
 
-**Solución para identificar los Recursos Humanos que incumplen el límite de 180 horas mensuales financiadas por CORFO.**  
+**Solución para identificar los Recursos Humanos que incumplen el límite de 168 horas mensuales financiadas por CORFO.**  
 
 
 ## Contenido
